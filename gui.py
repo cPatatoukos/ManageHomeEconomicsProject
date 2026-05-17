@@ -50,6 +50,8 @@ class main_gui:
         self.welcome_label = tk.Label(center_container, text=welcome_message, justify=tk.LEFT)
         self.welcome_label.pack(pady=20)
 
+    # Εισαγωγή Δεδομένων
+
     def data_entry(self):
         self.clear_right_frame()
 
@@ -94,6 +96,8 @@ class main_gui:
         data_type = getattr(self, 'data_type', None)
         # Εδώ θα βάλουμε τον τρόπο αποθήκευσης των δεδομένων
         print(f"Amount: {amount}, Category: {category}, Data Type: {data_type}")
+
+    # Τροποποίηση και Διαγραφή Δεδομένων
 
     def data_modify(self):
         self.clear_right_frame()
@@ -177,6 +181,7 @@ class main_gui:
         print(f"Ενημέρωση εγγραφής: {record} -> Νέο Ποσό: {new_amount}, Νέα Κατηγορία: {new_category}, Τύπος: {self.choice}")
         self.data_modify()  # Ενημέρωση της λίστας μετά την επεξεργασία
 
+    # Εμφάνιση Γραφημάτων και Στατιστικών
 
     def data_display(self):
         self.clear_right_frame()
