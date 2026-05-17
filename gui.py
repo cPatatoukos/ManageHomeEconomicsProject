@@ -2,77 +2,6 @@ from doctest import master
 import tkinter as tk
 
 
-class data_entry_gui:
-    def __init__(self, master, username):
-        self.master = master
-        self.username = username
-        self.choice = None
-        master.title("Data Entry")
-        master.geometry("400x300")
-
-        self.label = tk.Label(master, text="Εισαγωγή Δεδομένων")
-        self.label.pack(pady=10)
-
-        self.label_choice = tk.Label(master, text="Έσοδα ή Έξοδα")
-        self.label_choice.pack()
-
-        self.choice_frame = tk.Frame(master)
-        self.choice_frame.pack()
-
-        self.income_button = tk.Button(self.choice_frame, text="Έσοδα", command=self.income)
-        self.income_button.pack(side=tk.LEFT, padx=5)
-
-        self.expenses_button = tk.Button(self.choice_frame, text="Έξοδα", command=self.expenses)
-        self.expenses_button.pack(side=tk.RIGHT, padx=5)
-        
-        self.label_amount = tk.Label(master, text="Ποσό")
-        self.label_amount.pack()
-
-        self.entry_amount = tk.Entry(master)
-        self.entry_amount.pack()
-
-        self.label_category = tk.Label(master, text="Κατηγορία")
-        self.label_category.pack()
-
-        self.entry_category = tk.Entry(master)
-        self.entry_category.pack()
-
-        self.sybmit_or_back_frame = tk.Frame(master)
-        self.sybmit_or_back_frame.pack(pady=10)
-
-        self.submit_button = tk.Button(self.sybmit_or_back_frame, text="Submit", command=self.submit)
-        self.submit_button.pack(side=tk.LEFT, padx=5)
-
-        back_to_main_button = tk.Button(self.sybmit_or_back_frame, text="Back to Main", command=self.back_to_main)
-        back_to_main_button.pack(side=tk.RIGHT, padx=5)
-
-
-    def income(self):
-        self.choice = "Έσοδα"
-        self.income_button.config(relief=tk.SUNKEN)
-        self.expenses_button.config(relief=tk.RAISED)
-        print("Επιλέχθηκαν Έσοδα")
-
-    def expenses(self):
-        self.choice = "Έξοδα"
-        self.income_button.config(relief=tk.RAISED)
-        self.expenses_button.config(relief=tk.SUNKEN)
-        print("Επιλέχθηκαν Έξοδα")
-
-    def submit(self):
-        amount = self.entry_amount.get()
-        category = self.entry_category.get()
-        choice=self.choice
-        # Εδώ θα βάλουμε τον τρόπο αποθήκευσης των δεδομένων
-        print(f"Amount: {amount}, Category: {category}, Choice: {choice}")
-        self.back_to_main()
-    
-    def back_to_main(self):
-        main_window = tk.Toplevel(self.master)
-        main_gui(main_window, self.username)
-        self.master.withdraw() 
-
-
 # Κύρια οθόνη μετά το login, με τα κουμπιά για τις διάφορες λειτουργίες
 class main_gui:
     def __init__(self, master, username):
@@ -86,37 +15,90 @@ class main_gui:
 
         left_frame = tk.Frame(master)
         left_frame.pack(side=tk.LEFT, padx=10, pady=10)
-        tk.Button(left_frame, text="Εισαγωγή Δεδομένων", width=35, command=self.b1_pushed).pack(pady=5)
-        tk.Button(left_frame, text="Τροποποίηση Δεδομένων", width=35, command=self.b2_pushed).pack(pady=5)
-        tk.Button(left_frame, text="Διαγραφή Δεδομένων", width=35, command=self.b3_pushed).pack(pady=5)
-        tk.Button(left_frame, text="Εμφάνιση Δεδομένων", width=35, command=self.b4_pushed).pack(pady=5)
-        tk.Button(left_frame, text="Έξοδος", width=35, command=self.b5_pushed).pack(pady=5)
+        tk.Button(left_frame, text="Αρχική", width=35, command=self.show_welcome).pack(pady=5)
+        tk.Button(left_frame, text="Εισαγωγή Δεδομένων", width=35, command=self.data_entry).pack(pady=5)
+        tk.Button(left_frame, text="Τροποποίηση Δεδομένων", width=35, command=self.data_modify).pack(pady=5)
+        tk.Button(left_frame, text="Διαγραφή Δεδομένων", width=35, command=self.data_delete).pack(pady=5)
+        tk.Button(left_frame, text="Εμφάνιση Δεδομένων", width=35, command=self.data_display).pack(pady=5)
+        tk.Button(left_frame, text="Έξοδος", width=35, command=self.exit).pack(pady=5)
 
         # Δημιουργία text widget για εμφάνιση καλοσορίσματος
 
-        right_frame = tk.Frame(master)
-        right_frame.pack(side=tk.RIGHT, padx=10, pady=10, fill=tk.BOTH, expand=True)
-        self.output_text = tk.Text(right_frame, width=60, height=15)
-        self.output_text.pack(fill=tk.BOTH, expand=True)
-        self.output_text.config(state=tk.NORMAL)
-        self.output_text.delete(1.0, tk.END)
-        self.output_text.insert(tk.END, msg)
+        self.right_frame = tk.Frame(master)
+        self.right_frame.pack(side=tk.RIGHT, padx=10, pady=10, fill=tk.BOTH, expand=True)
     
-    def b1_pushed(self):
-        data_entry_window = tk.Toplevel(self.master)
-        data_entry_gui(data_entry_window, self.username)
-        self.master.withdraw()
+        #καλοσορίσμα
+        self.show_welcome()
+
+    def clear_right_frame(self):
+        for widget in self.right_frame.winfo_children():
+            widget.destroy()
+
+    def show_welcome(self):
+        self.clear_right_frame()
+
+        center_container = tk.Frame(self.right_frame)
+        center_container.pack(expand=True)
+
+        welcome_message = f"Καλώς ήρθατε στην εφαρμογή οικογενειακών οικονομικών {self.username}!\n\nΕπιλέξτε μια λειτουργία από το μενού στα αριστερά για να ξεκινήσετε."
+        self.welcome_label = tk.Label(center_container, text=welcome_message, justify=tk.LEFT)
+        self.welcome_label.pack(pady=20)
+
+    def data_entry(self):
+        self.clear_right_frame()
+
+        center_container = tk.Frame(self.right_frame)
+        center_container.place(relx=0.5, rely=0.5, anchor=tk.CENTER)
+
+        tk.Label(center_container, text="Εισαγωγή Δεδομένων", font=("Arial", 16, "bold")).pack(pady=10)
+
+        tk.Label(center_container, text="Επιλέξτε τύπο δεδομένων:").pack()
+        choice_frame = tk.Frame(center_container)
+        choice_frame.pack(pady=5)
+        self.income_button = tk.Button(choice_frame, text="Έσοδα", width=15, command=self.income)
+        self.income_button.pack(side=tk.LEFT, padx=5)
+        self.expenses_button = tk.Button(choice_frame, text="Έξοδα", width=15, command=self.expenses)
+        self.expenses_button.pack(side=tk.RIGHT, padx=5)
+
+        tk.Label(center_container, text="Ποσό:").pack()
+        self.entry_amount = tk.Entry(center_container)
+        self.entry_amount.pack()
+
+        tk.Label(center_container, text="Κατηγορία:").pack()
+        self.entry_category = tk.Entry(center_container)
+        self.entry_category.pack()
+
+        tk.Button(center_container, text="Submit", command=self.submit_data).pack(pady=10)
+   
+    def income(self):
+        self.choice = "Έσοδα"
+        self.income_button.config(relief=tk.SUNKEN)
+        self.expenses_button.config(relief=tk.RAISED)
+        print("Επιλέχθηκαν Έσοδα")
     
-    def b2_pushed(self):
+    def expenses(self):
+        self.choice = "Έξοδα"
+        self.income_button.config(relief=tk.RAISED)
+        self.expenses_button.config(relief=tk.SUNKEN)
+        print("Επιλέχθηκαν Έξοδα")
+
+    def submit_data(self):
+        amount = self.entry_amount.get()
+        category = self.entry_category.get()
+        data_type = getattr(self, 'data_type', None)
+        # Εδώ θα βάλουμε τον τρόπο αποθήκευσης των δεδομένων
+        print(f"Amount: {amount}, Category: {category}, Data Type: {data_type}")
+
+    def data_modify(self):
+        pass
+
+    def data_delete(self):
+        pass
+
+    def data_display(self):
         pass
     
-    def b3_pushed(self):
-        pass
-    
-    def b4_pushed(self):
-        pass
-    
-    def b5_pushed(self):
+    def exit(self):
         self.master.destroy()
 
 
