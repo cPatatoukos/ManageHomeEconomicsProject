@@ -437,9 +437,11 @@ class FinanceDB:
         user_id: Optional[int] = None,
     ) -> list[dict[str, Any]]:
         q = """
-            SELECT t.*, c.kind AS category_kind, c.name AS category_name
+            SELECT t.*, c.kind AS category_kind, c.name AS category_name,
+                   u.username AS username
             FROM transactions t
             JOIN categories c ON c.id = t.category_id
+            JOIN users u ON u.id = t.user_id
             WHERE t.year = ? AND t.month = ?
         """
         args: list[Any] = [year, month]
@@ -507,6 +509,62 @@ class FinanceDB:
             if cur.rowcount == 0:
                 raise NotFoundError(f"transaction id={transaction_id}")
 
+    def update_transaction_with_monthly(
+        self,
+        transaction_id: int,
+        *,
+        category_id: int,
+        user_id: int,
+        title: str,
+        amount: float,
+        year: int,
+        month: int,
+        is_monthly: bool,
+    ) -> None:
+        txn = self.get_transaction(transaction_id)
+        rid = txn.get("recurring_template_id")
+        title = title.strip()
+        if not title:
+            raise ValueError("Title cannot be empty.")
+        if amount <= 0:
+            raise ValueError("Invalid amount.")
+
+        with self.connection() as conn:
+            if is_monthly and not rid:
+                cur_t = conn.execute(
+                    """
+                    INSERT INTO recurring_templates (category_id, user_id, title, amount, is_active)
+                    VALUES (?, ?, ?, ?, 1)
+                    """,
+                    (category_id, user_id, title, float(amount)),
+                )
+                rid = int(cur_t.lastrowid)
+            elif is_monthly and rid:
+                conn.execute(
+                    """
+                    UPDATE recurring_templates
+                    SET category_id = ?, title = ?, amount = ?, is_active = 1
+                    WHERE id = ?
+                    """,
+                    (category_id, title, float(amount), rid),
+                )
+            elif not is_monthly and rid:
+                conn.execute(
+                    "UPDATE recurring_templates SET is_active = 0 WHERE id = ?",
+                    (rid,),
+                )
+                rid = None
+
+            conn.execute(
+                """
+                UPDATE transactions
+                SET category_id = ?, title = ?, amount = ?, year = ?, month = ?,
+                    recurring_template_id = ?
+                WHERE id = ?
+                """,
+                (category_id, title, float(amount), int(year), int(month), rid, transaction_id),
+            )
+
     # --- Συγχρονισμός μήνα ---
     def sync_recurring_for_month(self, year: int, month: int) -> int:
         y, m = int(year), int(month)
@@ -552,19 +610,23 @@ class FinanceDB:
         return inserted
 
     # --- Αναφορές ---
-    def monthly_totals(self, year: int, month: int) -> dict[str, float]:
+    def monthly_totals(
+        self, year: int, month: int, *, user_id: Optional[int] = None
+    ) -> dict[str, float]:
+        q = """
+            SELECT
+                COALESCE(SUM(CASE WHEN c.kind = 'income' THEN t.amount END), 0) AS income,
+                COALESCE(SUM(CASE WHEN c.kind = 'expense' THEN t.amount END), 0) AS expense
+            FROM transactions t
+            JOIN categories c ON c.id = t.category_id
+            WHERE t.year = ? AND t.month = ?
+        """
+        args: list[Any] = [year, month]
+        if user_id is not None:
+            q += " AND t.user_id = ?"
+            args.append(user_id)
         with self.connection() as conn:
-            row = conn.execute(
-                """
-                SELECT
-                    COALESCE(SUM(CASE WHEN c.kind = 'income' THEN t.amount END), 0) AS income,
-                    COALESCE(SUM(CASE WHEN c.kind = 'expense' THEN t.amount END), 0) AS expense
-                FROM transactions t
-                JOIN categories c ON c.id = t.category_id
-                WHERE t.year = ? AND t.month = ?
-                """,
-                (year, month),
-            ).fetchone()
+            row = conn.execute(q, args).fetchone()
         income = float(row["income"])
         expense = float(row["expense"])
         return {"income": income, "expense": expense, "net": income - expense}
@@ -575,23 +637,50 @@ class FinanceDB:
         month: int,
         *,
         kind: str,
+        user_id: Optional[int] = None,
     ) -> list[dict[str, Any]]:
         kind = kind.strip().lower()
         if kind not in ("income", "expense"):
             raise ValueError("kind must be income/expense.")
+        q = """
+            SELECT c.id AS category_id, c.name AS category_name,
+                   SUM(t.amount) AS total
+            FROM transactions t
+            JOIN categories c ON c.id = t.category_id
+            WHERE t.year = ? AND t.month = ? AND c.kind = ?
+        """
+        args: list[Any] = [year, month, kind]
+        if user_id is not None:
+            q += " AND t.user_id = ?"
+            args.append(user_id)
+        q += " GROUP BY c.id, c.name ORDER BY total DESC"
         with self.connection() as conn:
-            rows = conn.execute(
-                """
-                SELECT c.id AS category_id, c.name AS category_name,
-                       SUM(t.amount) AS total
-                FROM transactions t
-                JOIN categories c ON c.id = t.category_id
-                WHERE t.year = ? AND t.month = ? AND c.kind = ?
-                GROUP BY c.id, c.name
-                ORDER BY total DESC
-                """,
-                (year, month, kind),
-            ).fetchall()
+            rows = conn.execute(q, args).fetchall()
+        return [dict(r) for r in rows]
+
+    def list_recurring_templates_detailed(
+        self,
+        *,
+        user_id: Optional[int] = None,
+        active_only: bool = False,
+    ) -> list[dict[str, Any]]:
+        q = """
+            SELECT r.*, c.name AS category_name, c.kind AS category_kind,
+                   u.username AS username
+            FROM recurring_templates r
+            JOIN categories c ON c.id = r.category_id
+            JOIN users u ON u.id = r.user_id
+            WHERE 1=1
+        """
+        args: list[Any] = []
+        if user_id is not None:
+            q += " AND r.user_id = ?"
+            args.append(user_id)
+        if active_only:
+            q += " AND r.is_active = 1"
+        q += " ORDER BY r.is_active DESC, c.kind, r.title"
+        with self.connection() as conn:
+            rows = conn.execute(q, args).fetchall()
         return [dict(r) for r in rows]
 
     def transactions_for_category_range(
@@ -616,6 +705,86 @@ class FinanceDB:
                 (category_id, start_year, start_month, end_year, end_month),
             ).fetchall()
         return [dict(r) for r in rows]
+
+    def yearly_monthly_summary(
+        self,
+        year: int,
+        *,
+        user_id: Optional[int] = None,
+    ) -> list[dict[str, Any]]:
+        q = """
+            SELECT
+                t.month,
+                COALESCE(SUM(CASE WHEN c.kind = 'income' THEN t.amount END), 0) AS income,
+                COALESCE(SUM(CASE WHEN c.kind = 'expense' THEN t.amount END), 0) AS expense
+            FROM transactions t
+            JOIN categories c ON c.id = t.category_id
+            WHERE t.year = ?
+        """
+        args: list[Any] = [year]
+        if user_id is not None:
+            q += " AND t.user_id = ?"
+            args.append(user_id)
+        q += " GROUP BY t.month ORDER BY t.month"
+        with self.connection() as conn:
+            rows = conn.execute(q, args).fetchall()
+        by_month = {int(r["month"]): dict(r) for r in rows}
+        return [
+            {
+                "month": m,
+                "income": float(by_month.get(m, {}).get("income", 0)),
+                "expense": float(by_month.get(m, {}).get("expense", 0)),
+            }
+            for m in range(1, 13)
+        ]
+
+    def expense_series_by_month(
+        self,
+        start_year: int,
+        start_month: int,
+        end_year: int,
+        end_month: int,
+        *,
+        category_id: Optional[int] = None,
+        user_id: Optional[int] = None,
+    ) -> list[dict[str, Any]]:
+        q = """
+            SELECT t.year, t.month, SUM(t.amount) AS total
+            FROM transactions t
+            JOIN categories c ON c.id = t.category_id
+            WHERE c.kind = 'expense'
+              AND (t.year * 100 + t.month) >= (? * 100 + ?)
+              AND (t.year * 100 + t.month) <= (? * 100 + ?)
+        """
+        args: list[Any] = [start_year, start_month, end_year, end_month]
+        if category_id is not None:
+            q += " AND t.category_id = ?"
+            args.append(category_id)
+        if user_id is not None:
+            q += " AND t.user_id = ?"
+            args.append(user_id)
+        q += " GROUP BY t.year, t.month ORDER BY t.year, t.month"
+        with self.connection() as conn:
+            rows = conn.execute(q, args).fetchall()
+        return [{"year": r["year"], "month": r["month"], "total": float(r["total"])} for r in rows]
+
+    def seed_default_categories(self) -> None:
+        defaults = [
+            ("Μισθός", "income"),
+            ("Επένδυση", "income"),
+            ("Άλλα έσοδα", "income"),
+            ("Φαγητό", "expense"),
+            ("Μεταφορικά", "expense"),
+            ("Λογαριασμοί", "expense"),
+            ("Ψυχαγωγία", "expense"),
+            ("Άλλα έξοδα", "expense"),
+        ]
+        with self.connection() as conn:
+            for name, kind in defaults:
+                conn.execute(
+                    "INSERT OR IGNORE INTO categories (name, kind) VALUES (?, ?)",
+                    (name, kind),
+                )
 
 
 # --- Γεννήτρια (έτος, μήνας) σε κλειστό διάστημα ---
