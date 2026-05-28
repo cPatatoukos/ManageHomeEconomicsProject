@@ -4,13 +4,32 @@ import hashlib
 import hmac
 import secrets
 import sqlite3
+import sys
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Generator, Iterable, Optional
 
-DEFAULT_DB_PATH = Path(__file__).resolve().parent / "finance.db"
-_SCHEMA_PATH = Path(__file__).resolve().parent / "schema.sql"
+
+def _resource_dir() -> Path:
+    if getattr(sys, "frozen", False):
+        return Path(getattr(sys, "_MEIPASS", Path(sys.executable).resolve().parent))
+    return Path(__file__).resolve().parent
+
+
+def _data_dir() -> Path:
+    if getattr(sys, "frozen", False):
+        if sys.platform == "darwin":
+            base = Path.home() / "Library" / "Application Support" / "FamilyFinance"
+        else:
+            base = Path(sys.executable).resolve().parent
+        base.mkdir(parents=True, exist_ok=True)
+        return base
+    return Path(__file__).resolve().parent
+
+
+DEFAULT_DB_PATH = _data_dir() / "finance.db"
+_SCHEMA_PATH = _resource_dir() / "schema.sql"
 
 _ITERATIONS = 120_000
 

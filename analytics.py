@@ -3,6 +3,10 @@ from __future__ import annotations
 from datetime import date
 from typing import Any, Optional
 
+import matplotlib
+
+matplotlib.use("TkAgg")
+
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from matplotlib.figure import Figure
