@@ -3,7 +3,7 @@ from __future__ import annotations
 import tkinter as tk
 from datetime import date
 from pathlib import Path
-from tkinter import filedialog, messagebox, ttk
+from tkinter import filedialog, messagebox, simpledialog, ttk
 from typing import Any, Callable, Optional
 
 from analytics import (
@@ -462,6 +462,9 @@ class FinanceApp:
             return
         try:
             if self.auth_mode.get() == "register":
+                if self.db.username_exists(username):
+                    messagebox.showerror("Σφάλμα", "Το όνομα χρήστη υπάρχει ήδη.")
+                    return
                 self.db.create_user(username, password)
                 messagebox.showinfo("Επιτυχία", "Ο λογαριασμός δημιουργήθηκε. Συνδεθείτε τώρα.")
                 self.auth_mode.set("login")
@@ -505,6 +508,7 @@ class FinanceApp:
             ("categories", "Κατηγορίες"),
             ("analytics", "Στατιστικά"),
             ("export", "Εξαγωγή"),
+            ("account", "Λογαριασμός"),
         ]
         self.nav_buttons = {}
         self.nav_indicators = {}
@@ -556,6 +560,7 @@ class FinanceApp:
             "categories": self._page_categories,
             "analytics": self._page_analytics,
             "export": self._page_export,
+            "account": self._page_account,
         }[key]()
 
     def _card(self, parent: tk.Misc, title: str, value: str, color: str) -> tk.Frame:
@@ -1065,6 +1070,98 @@ class FinanceApp:
             modern_button(btn_f, "Διαγραφή", delete_cat).pack(side="left")
             lb.bind("<Double-1>", lambda _e: edit_cat())
             reload_list()
+
+    def _page_account(self) -> None:
+        tk.Label(self.content, text="Λογαριασμός", font=FONT_TITLE, bg=COLORS["bg"], fg=COLORS["text"]).pack(anchor="w")
+        card = shadow_card(self.content, inner_padx=28, inner_pady=24, fill="x")
+        card.pack(fill="x", pady=(16, 0))
+
+        tk.Label(
+            card,
+            text=f"Συνδεδεμένος ως: {self.user['username']}",
+            font=FONT_BOLD,
+            bg=COLORS["card"],
+            fg=COLORS["text"],
+        ).pack(anchor="w", pady=(0, 16))
+
+        labeled(card, "Νέο όνομα χρήστη (κενό = χωρίς αλλαγή)", COLORS["card"]).pack(anchor="w")
+        username_e = modern_entry(card, width=36)
+        username_e.pack(fill="x", pady=(4, 12))
+
+        labeled(card, "Νέος κωδικός (κενό = χωρίς αλλαγή)", COLORS["card"]).pack(anchor="w")
+        password_e = modern_entry(card, width=36, show="•")
+        password_e.pack(fill="x", pady=(4, 20))
+
+        def save_account() -> None:
+            new_username = username_e.get().strip()
+            new_password = password_e.get()
+            if not new_username and not new_password:
+                messagebox.showinfo("Λογαριασμός", "Δεν υπάρχουν αλλαγές προς αποθήκευση.")
+                return
+            try:
+                self.db.update_user(
+                    self.user["id"],
+                    username=new_username or None,
+                    password=new_password or None,
+                )
+                if new_username:
+                    self.user["username"] = new_username
+                username_e.delete(0, tk.END)
+                password_e.delete(0, tk.END)
+                messagebox.showinfo("Επιτυχία", "Ο λογαριασμός ενημερώθηκε.")
+            except DuplicateUsernameError:
+                messagebox.showerror("Σφάλμα", "Το όνομα χρήστη υπάρχει ήδη.")
+            except ValueError as e:
+                messagebox.showerror("Σφάλμα", str(e))
+            except FinanceDBError as e:
+                messagebox.showerror("Σφάλμα", str(e))
+
+        def delete_account() -> None:
+            if not messagebox.askyesno(
+                "Διαγραφή λογαριασμού",
+                f"Διαγραφή του λογαριασμού «{self.user['username']}»;\n\n"
+                "Θα διαγραφούν και όλες οι συναλλαγές και τα μηνιαία πρότυπά σας.",
+            ):
+                return
+            confirm = simpledialog.askstring(
+                "Επιβεβαίωση",
+                f"Πληκτρολογήστε το όνομα «{self.user['username']}» για επιβεβαίωση:",
+                parent=self.root,
+            )
+            if confirm != self.user["username"]:
+                messagebox.showinfo("Ακύρωση", "Η διαγραφή ακυρώθηκε.")
+                return
+            try:
+                self.db.delete_user(self.user["id"])
+                messagebox.showinfo("Επιτυχία", "Ο λογαριασμός διαγράφηκε.")
+                self._show_auth()
+            except FinanceDBError as e:
+                messagebox.showerror("Σφάλμα", str(e))
+
+        btn_row = tk.Frame(card, bg=COLORS["card"])
+        btn_row.pack(fill="x")
+        modern_button(btn_row, "Αποθήκευση αλλαγών", save_account, primary=True).pack(side="left", padx=(0, 8))
+        modern_button(btn_row, "Διαγραφή λογαριασμού", delete_account).pack(side="left")
+
+        others = [u for u in self.db.list_users() if u["id"] != self.user["id"]]
+        if others:
+            family_card = shadow_card(self.content, inner_padx=28, inner_pady=20, fill="x")
+            family_card.pack(fill="x", pady=(16, 0))
+            tk.Label(
+                family_card,
+                text="Άλλοι χρήστες οικογένειας",
+                font=FONT_BOLD,
+                bg=COLORS["card"],
+                fg=COLORS["text"],
+            ).pack(anchor="w", pady=(0, 8))
+            for u in others:
+                tk.Label(
+                    family_card,
+                    text=f"• {u['username']}",
+                    font=FONT,
+                    bg=COLORS["card"],
+                    fg=COLORS["text"],
+                ).pack(anchor="w")
 
     def _page_analytics(self) -> None:
         ttk.Label(self.content, text="Στατιστικά & Γραφήματα", style="Title.TLabel").pack(anchor="w")

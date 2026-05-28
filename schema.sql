@@ -31,7 +31,7 @@ CREATE TABLE IF NOT EXISTS recurring_templates (
     FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
 );
 
--- Συναλλαγές ανά ημερολογιακό μήνα --
+-- Συναλλαγές ανά μήνα --
 CREATE TABLE IF NOT EXISTS transactions (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     category_id INTEGER NOT NULL,

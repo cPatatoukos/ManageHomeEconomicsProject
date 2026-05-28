@@ -84,19 +84,33 @@ class FinanceDB:
         finally:
             conn.close()
 
-    def initialize(self, *, force_reload_schema: bool = False) -> None:
-        # --- Καθαρή επανεκκίνηση ---
-        if force_reload_schema and self.db_path.exists():
-            self.db_path.unlink()
+    def initialize(self) -> None:
         sql = _SCHEMA_PATH.read_text(encoding="utf-8")
         with self.connection() as conn:
             conn.executescript(sql)
 
     # --- Χρήστες ---
+    def username_exists(
+        self, username: str, *, exclude_user_id: Optional[int] = None
+    ) -> bool:
+        username = username.strip()
+        if not username:
+            return False
+        q = "SELECT 1 FROM users WHERE username = ?"
+        args: list[Any] = [username]
+        if exclude_user_id is not None:
+            q += " AND id != ?"
+            args.append(exclude_user_id)
+        with self.connection() as conn:
+            row = conn.execute(q, args).fetchone()
+        return row is not None
+
     def create_user(self, username: str, password: str) -> int:
         username = username.strip()
         if not username:
             raise ValueError("Username cannot be empty.")
+        if self.username_exists(username):
+            raise DuplicateUsernameError(username)
         salt = secrets.token_bytes(16)
         phash = _hash_password(password, salt)
         try:
@@ -109,7 +123,7 @@ class FinanceDB:
         except sqlite3.IntegrityError as e:
             if "username" in str(e).lower() or "unique" in str(e).lower():
                 raise DuplicateUsernameError(username) from e
-            raise
+            raise FinanceDBError("Database constraint violation.") from e
 
     def verify_user(self, username: str, password: str) -> dict[str, Any]:
         with self.connection() as conn:
@@ -132,15 +146,6 @@ class FinanceDB:
             "created_at": row["created_at"],
         }
 
-    def get_user(self, user_id: int) -> dict[str, Any]:
-        with self.connection() as conn:
-            row = conn.execute(
-                "SELECT id, username, created_at FROM users WHERE id = ?", (user_id,)
-            ).fetchone()
-        if row is None:
-            raise NotFoundError(f"user id={user_id}")
-        return dict(row)
-
     def list_users(self) -> list[dict[str, Any]]:
         with self.connection() as conn:
             rows = conn.execute(
@@ -161,6 +166,8 @@ class FinanceDB:
             u = username.strip()
             if not u:
                 raise ValueError("Username cannot be empty.")
+            if self.username_exists(u, exclude_user_id=user_id):
+                raise DuplicateUsernameError(u)
             sets.append("username = ?")
             args.append(u)
         if password is not None:
@@ -281,31 +288,6 @@ class FinanceDB:
             )
 
     # --- Μηνιαία πρότυπα ---
-    def create_recurring_template(
-        self,
-        category_id: int,
-        user_id: int,
-        title: str,
-        amount: float,
-        *,
-        is_active: bool = True,
-    ) -> int:
-        self._require_category(category_id)
-        title = title.strip()
-        if not title:
-            raise ValueError("Title cannot be empty.")
-        if amount <= 0:
-            raise ValueError("Amount must be positive.")
-        with self.connection() as conn:
-            cur = conn.execute(
-                """
-                INSERT INTO recurring_templates (category_id, user_id, title, amount, is_active)
-                VALUES (?, ?, ?, ?, ?)
-                """,
-                (category_id, user_id, title, float(amount), 1 if is_active else 0),
-            )
-            return int(cur.lastrowid)
-
     def get_recurring_template(self, template_id: int) -> dict[str, Any]:
         with self.connection() as conn:
             row = conn.execute(
@@ -314,24 +296,6 @@ class FinanceDB:
         if row is None:
             raise NotFoundError(f"recurring_template id={template_id}")
         return dict(row)
-
-    def list_recurring_templates(
-        self,
-        *,
-        user_id: Optional[int] = None,
-        active_only: bool = False,
-    ) -> list[dict[str, Any]]:
-        q = "SELECT * FROM recurring_templates WHERE 1=1"
-        args: list[Any] = []
-        if user_id is not None:
-            q += " AND user_id = ?"
-            args.append(user_id)
-        if active_only:
-            q += " AND is_active = 1"
-        q += " ORDER BY id"
-        with self.connection() as conn:
-            rows = conn.execute(q, args).fetchall()
-        return [dict(r) for r in rows]
 
     def update_recurring_template(
         self,
@@ -474,53 +438,6 @@ class FinanceDB:
         with self.connection() as conn:
             rows = conn.execute(q, args).fetchall()
         return [dict(r) for r in rows]
-
-    def update_transaction(
-        self,
-        transaction_id: int,
-        *,
-        category_id: Optional[int] = None,
-        title: Optional[str] = None,
-        amount: Optional[float] = None,
-        year: Optional[int] = None,
-        month: Optional[int] = None,
-    ) -> None:
-        if category_id is not None:
-            self._require_category(category_id)
-        sets: list[str] = []
-        args: list[Any] = []
-        if category_id is not None:
-            sets.append("category_id = ?")
-            args.append(category_id)
-        if title is not None:
-            t = title.strip()
-            if not t:
-                raise ValueError("Title cannot be empty.")
-            sets.append("title = ?")
-            args.append(t)
-        if amount is not None:
-            if amount <= 0:
-                raise ValueError("Invalid amount.")
-            sets.append("amount = ?")
-            args.append(float(amount))
-        if year is not None:
-            sets.append("year = ?")
-            args.append(int(year))
-        if month is not None:
-            mo = int(month)
-            if mo < 1 or mo > 12:
-                raise ValueError("Invalid month.")
-            sets.append("month = ?")
-            args.append(mo)
-        if not sets:
-            return
-        args.append(transaction_id)
-        with self.connection() as conn:
-            cur = conn.execute(
-                f"UPDATE transactions SET {', '.join(sets)} WHERE id = ?", args
-            )
-            if cur.rowcount == 0:
-                raise NotFoundError(f"transaction id={transaction_id}")
 
     def delete_transaction(self, transaction_id: int) -> None:
         with self.connection() as conn:
@@ -700,29 +617,6 @@ class FinanceDB:
         q += " ORDER BY r.is_active DESC, c.kind, r.title"
         with self.connection() as conn:
             rows = conn.execute(q, args).fetchall()
-        return [dict(r) for r in rows]
-
-    def transactions_for_category_range(
-        self,
-        category_id: int,
-        start_year: int,
-        start_month: int,
-        end_year: int,
-        end_month: int,
-    ) -> list[dict[str, Any]]:
-        with self.connection() as conn:
-            rows = conn.execute(
-                """
-                SELECT t.*, c.kind AS category_kind
-                FROM transactions t
-                JOIN categories c ON c.id = t.category_id
-                WHERE t.category_id = ?
-                  AND (t.year * 100 + t.month) >= (? * 100 + ?)
-                  AND (t.year * 100 + t.month) <= (? * 100 + ?)
-                ORDER BY t.year, t.month, t.id
-                """,
-                (category_id, start_year, start_month, end_year, end_month),
-            ).fetchall()
         return [dict(r) for r in rows]
 
     def yearly_monthly_summary(
